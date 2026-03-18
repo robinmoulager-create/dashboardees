@@ -67,7 +67,6 @@ if eleva_raw is None:
         "Ce fonds (LU1111643042) n'est pas disponible directement sur Yahoo Finance. "
         "**Solution** : uploadez un fichier CSV avec les VL historiques (colonne Date + VL)."
     )
-
     uploaded = st.file_uploader(
         "📂 Uploader un fichier CSV (colonnes : Date, VL)", type=["csv"]
     )
@@ -135,6 +134,9 @@ st.plotly_chart(fig, use_container_width=True)
 # =====================
 # Performances
 # =====================
+def fmt(v):
+    return f"{v:+.2f}%" if v == v else "N/A"  # v == v is False for NaN
+
 if eleva_raw is not None:
 
     def perf(series, days):
@@ -176,8 +178,6 @@ if eleva_raw is not None:
         else:
             e = perf(eleva_index, days)
             s = perf(stoxx_index_plot, days)
-        def fmt(v):
-            return f"{v:+.2f}%" if v == v else "N/A"  # v == v is False for NaN
 
         rows.append({
             "Période": label,
@@ -200,9 +200,11 @@ if eleva_raw is not None:
         sharpe = (ret.mean() * 252) / (ret.std() * (252 ** 0.5)) if ret.std() > 0 else float("nan")
         roll_max = series.cummax()
         max_dd = ((series - roll_max) / roll_max).min() * 100
-        return {"Volatilité annualisée": f"{vol:.2f}%",
-                "Ratio de Sharpe (approx.)": f"{sharpe:.2f}",
-                "Drawdown max": f"{max_dd:.2f}%"}
+        return {
+            "Volatilité annualisée": f"{vol:.2f}%",
+            "Ratio de Sharpe (approx.)": f"{sharpe:.2f}",
+            "Drawdown max": f"{max_dd:.2f}%"
+        }
 
     col1, col2 = st.columns(2)
     with col1:
