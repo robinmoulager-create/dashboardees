@@ -176,11 +176,14 @@ if eleva_raw is not None:
         else:
             e = perf(eleva_index, days)
             s = perf(stoxx_index_plot, days)
+        def fmt(v):
+            return f"{v:+.2f}%" if v == v else "N/A"  # v == v is False for NaN
+
         rows.append({
             "Période": label,
-            "ELEVA I EUR Acc": f"{e:+.2f}%",
-            "STOXX 600 NR (DX2X.DE)": f"{s:+.2f}%",
-            "Surperformance ELEVA": f"{e - s:+.2f}%",
+            "ELEVA I EUR Acc": fmt(e),
+            "STOXX 600 NR (DX2X.DE)": fmt(s),
+            "Surperformance ELEVA": fmt(e - s),
         })
 
     st.subheader("📈 Tableau des performances")
