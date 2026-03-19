@@ -1,5 +1,4 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
@@ -10,105 +9,117 @@ st.set_page_config(page_title="ELEVA vs STOXX Europe 600", layout="wide")
 st.title("📊 ELEVA European Selection I EUR Acc vs STOXX Europe 600 Net Return")
 
 # =====================
-# Stockage persistant des NAV ELEVA
-# On utilise un fichier local dans le repo Streamlit Cloud
+# Stockage persistant (JSON)
 # =====================
-NAV_STORE_PATH = "eleva_nav_store.json"
+STORE_PATH = "nav_store.json"
 
-def save_nav(df: pd.Series):
-    """Sauvegarde la série NAV en JSON"""
+def save_data(eleva: pd.Series, stoxx: pd.Series):
     data = {
-        "dates": [d.strftime("%Y-%m-%d") for d in df.index],
-        "values": [float(v) for v in df.values]
+        "eleva_dates":  [d.strftime("%Y-%m-%d") for d in eleva.index],
+        "eleva_values": [float(v) for v in eleva.values],
+        "stoxx_dates":  [d.strftime("%Y-%m-%d") for d in stoxx.index],
+        "stoxx_values": [float(v) for v in stoxx.values],
     }
-    with open(NAV_STORE_PATH, "w") as f:
+    with open(STORE_PATH, "w") as f:
         json.dump(data, f)
 
-def load_nav_stored() -> pd.Series | None:
-    """Charge la série NAV sauvegardée"""
-    if not os.path.exists(NAV_STORE_PATH):
-        return None
+def load_data():
+    if not os.path.exists(STORE_PATH):
+        return None, None
     try:
-        with open(NAV_STORE_PATH, "r") as f:
+        with open(STORE_PATH, "r") as f:
             data = json.load(f)
-        index = pd.to_datetime(data["dates"])
-        series = pd.Series(data["values"], index=index, name="NAV")
-        series.index = pd.DatetimeIndex(series.index)
-        return series.sort_index()
+        eleva = pd.Series(
+            data["eleva_values"],
+            index=pd.DatetimeIndex(pd.to_datetime(data["eleva_dates"])),
+            name="ELEVA"
+        ).sort_index()
+        stoxx = pd.Series(
+            data["stoxx_values"],
+            index=pd.DatetimeIndex(pd.to_datetime(data["stoxx_dates"])),
+            name="STOXX"
+        ).sort_index()
+        return eleva, stoxx
     except Exception:
-        return None
+        return None, None
 
 # =====================
-# Sidebar
+# Sidebar — upload Excel
 # =====================
 start = st.sidebar.date_input("Date de début", datetime(2015, 1, 26))
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("📂 Mise à jour NAV ELEVA")
+st.sidebar.subheader("📂 Mise à jour des données")
 st.sidebar.markdown("""
-Uploadez un CSV avec les colonnes :
-- `Date` (format DD/MM/YYYY ou YYYY-MM-DD)
-- `NAV` (valeur liquidative)
+Uploadez un fichier Excel avec :
+- **Colonne A** : Date
+- **Colonne B** : NAV ELEVA European Selection
+- **Colonne C** : NAV STOXX Europe 600
+- La **ligne 1** contient les en-têtes
 """)
 
-uploaded = st.sidebar.file_uploader("Uploader un CSV de NAV", type=["csv"])
+uploaded = st.sidebar.file_uploader("Uploader un fichier Excel", type=["xlsx", "xls"])
 
 if uploaded is not None:
     try:
-        df_up = pd.read_csv(uploaded)
-        # Détecter la colonne date
-        date_col = next((c for c in df_up.columns if "date" in c.lower()), df_up.columns[0])
-        # Détecter la colonne valeur
-        val_col = next((c for c in df_up.columns if c.lower() not in [date_col.lower()]), df_up.columns[1])
+        df_up = pd.read_excel(uploaded, header=0)
+
+        # Colonnes A, B, C = positions 0, 1, 2
+        date_col  = df_up.columns[0]
+        eleva_col = df_up.columns[1]
+        stoxx_col = df_up.columns[2]
+
         df_up[date_col] = pd.to_datetime(df_up[date_col], dayfirst=True)
         df_up = df_up.set_index(date_col).sort_index()
-        nav_series = df_up[val_col].squeeze().astype(float)
+
+        new_eleva = df_up[eleva_col].astype(float).dropna()
+        new_stoxx = df_up[stoxx_col].astype(float).dropna()
 
         # Fusionner avec les données existantes
-        existing = load_nav_stored()
-        if existing is not None:
-            nav_series = pd.concat([existing, nav_series])
-            nav_series = nav_series[~nav_series.index.duplicated(keep="last")]
-            nav_series = nav_series.sort_index()
+        existing_eleva, existing_stoxx = load_data()
 
-        save_nav(nav_series)
-        st.sidebar.success(f"✅ {len(nav_series)} points de NAV sauvegardés (du {nav_series.index[0].strftime('%d/%m/%Y')} au {nav_series.index[-1].strftime('%d/%m/%Y')})")
+        if existing_eleva is not None:
+            new_eleva = pd.concat([existing_eleva, new_eleva])
+            new_eleva = new_eleva[~new_eleva.index.duplicated(keep="last")].sort_index()
+        if existing_stoxx is not None:
+            new_stoxx = pd.concat([existing_stoxx, new_stoxx])
+            new_stoxx = new_stoxx[~new_stoxx.index.duplicated(keep="last")].sort_index()
+
+        save_data(new_eleva, new_stoxx)
         st.cache_data.clear()
+
+        st.sidebar.success(
+            f"✅ Données sauvegardées !\n\n"
+            f"**ELEVA** : {len(new_eleva)} points "
+            f"({new_eleva.index[0].strftime('%d/%m/%Y')} → {new_eleva.index[-1].strftime('%d/%m/%Y')})\n\n"
+            f"**STOXX** : {len(new_stoxx)} points "
+            f"({new_stoxx.index[0].strftime('%d/%m/%Y')} → {new_stoxx.index[-1].strftime('%d/%m/%Y')})"
+        )
     except Exception as e:
-        st.sidebar.error(f"Erreur lors du chargement du CSV : {e}")
+        st.sidebar.error(f"Erreur lors du chargement du fichier : {e}")
 
-# Afficher le statut des données stockées
-stored_nav = load_nav_stored()
-if stored_nav is not None:
-    st.sidebar.info(f"📊 Données en base : {len(stored_nav)} points\n\n{stored_nav.index[0].strftime('%d/%m/%Y')} → {stored_nav.index[-1].strftime('%d/%m/%Y')}")
+# Statut des données en base
+stored_eleva, stored_stoxx = load_data()
+if stored_eleva is not None:
+    st.sidebar.info(
+        f"📊 **Données en base**\n\n"
+        f"ELEVA : {len(stored_eleva)} pts — "
+        f"{stored_eleva.index[0].strftime('%d/%m/%Y')} → {stored_eleva.index[-1].strftime('%d/%m/%Y')}\n\n"
+        f"STOXX : {len(stored_stoxx)} pts — "
+        f"{stored_stoxx.index[0].strftime('%d/%m/%Y')} → {stored_stoxx.index[-1].strftime('%d/%m/%Y')}"
+    )
 else:
-    st.sidebar.warning("⚠️ Aucune donnée ELEVA en base. Uploadez un CSV.")
+    st.sidebar.warning("⚠️ Aucune donnée en base. Uploadez un fichier Excel.")
 
 # =====================
-# Chargement STOXX 600
+# Vérification données disponibles
 # =====================
-STOXX600_TICKER = "^STOXX"
-
-@st.cache_data(ttl=3600)
-def load_stoxx(ticker, start):
-    try:
-        tmp = yf.download(ticker, start=start, auto_adjust=True, progress=False)
-        if tmp.empty:
-            return None
-        col = "Close" if "Close" in tmp.columns else tmp.columns[0]
-        return tmp[col].squeeze()
-    except Exception:
-        return None
-
-with st.spinner("Chargement STOXX 600…"):
-    stoxx_raw = load_stoxx(STOXX600_TICKER, start)
-
-if stoxx_raw is None:
-    st.error("⚠️ Impossible de charger les données STOXX 600 (^STOXX).")
+if stored_eleva is None or stored_stoxx is None:
+    st.warning("⚠️ Aucune donnée disponible. Uploadez un fichier Excel via la sidebar.")
     st.stop()
 
 # =====================
-# Préparer les séries sur la période sélectionnée
+# Rebasage dynamique à 100
 # =====================
 def build_index(series: pd.Series, start) -> pd.Series:
     series = series.dropna().squeeze()
@@ -117,40 +128,32 @@ def build_index(series: pd.Series, start) -> pd.Series:
         return series
     return series / float(series.iloc[0]) * 100
 
-stoxx_index = build_index(stoxx_raw, start)
+eleva_index = build_index(stored_eleva, start)
+stoxx_index = build_index(stored_stoxx, start)
 
-eleva_index = None
-if stored_nav is not None:
-    eleva_index = build_index(stored_nav, start)
-    if eleva_index.empty:
-        st.warning("⚠️ Pas de données ELEVA sur la période sélectionnée. Changez la date de début.")
-        eleva_index = None
+if eleva_index.empty or stoxx_index.empty:
+    st.warning("⚠️ Pas de données sur la période sélectionnée. Changez la date de début.")
+    st.stop()
 
-if eleva_index is not None:
-    common = eleva_index.index.intersection(stoxx_index.index)
-    eleva_index = eleva_index.loc[common]
-    stoxx_index_plot = stoxx_index.loc[common]
-else:
-    stoxx_index_plot = stoxx_index
+# Aligner sur les dates communes
+common = eleva_index.index.intersection(stoxx_index.index)
+eleva_index = eleva_index.loc[common]
+stoxx_index = stoxx_index.loc[common]
 
 # =====================
 # Graphique performance cumulée
 # =====================
 fig = go.Figure()
-
-if eleva_index is not None:
-    fig.add_trace(go.Scatter(
-        x=eleva_index.index, y=eleva_index,
-        name="ELEVA European Selection I EUR Acc",
-        line=dict(width=3, color="#1f77b4")
-    ))
-
 fig.add_trace(go.Scatter(
-    x=stoxx_index_plot.index, y=stoxx_index_plot,
+    x=eleva_index.index, y=eleva_index,
+    name="ELEVA European Selection I EUR Acc",
+    line=dict(width=3, color="#1f77b4")
+))
+fig.add_trace(go.Scatter(
+    x=stoxx_index.index, y=stoxx_index,
     name="STOXX Europe 600 Net Return",
     line=dict(width=3, color="#d62728", dash="dash")
 ))
-
 fig.update_layout(
     height=550,
     template="plotly_white",
@@ -210,60 +213,65 @@ def risk_stats(series):
 # =====================
 # Tableau des performances
 # =====================
-if eleva_index is not None:
-    periods = {
-        "Hier (J-1)": 1,
-        "1 semaine": 7,
-        "1 mois": 30,
-        "3 mois": 90,
-        "YTD": None,
-        "6 mois": 180,
-        "1 an": 365,
-        "3 ans": 3 * 365,
-        "Depuis le début": -1,
-    }
+periods = {
+    "Hier (J-1)": 1,
+    "1 semaine": 7,
+    "1 mois": 30,
+    "3 mois": 90,
+    "YTD": None,
+    "6 mois": 180,
+    "1 an": 365,
+    "3 ans": 3 * 365,
+    "Depuis le début": -1,
+}
 
-    rows = []
-    for label, days in periods.items():
-        if days == -1:
-            e = (float(eleva_index.iloc[-1]) / float(eleva_index.iloc[0]) - 1) * 100
-            s = (float(stoxx_index_plot.iloc[-1]) / float(stoxx_index_plot.iloc[0]) - 1) * 100
-        elif days is None:
-            e = perf_ytd(eleva_index)
-            s = perf_ytd(stoxx_index_plot)
-        else:
-            e = perf_safe(eleva_index, days)
-            s = perf_safe(stoxx_index_plot, days)
-        rows.append({
-            "Période": label,
-            "ELEVA I EUR Acc": fmt(e),
-            "STOXX 600 NR": fmt(s),
-            "Surperformance ELEVA": fmt(e - s),
-        })
+rows = []
+for label, days in periods.items():
+    if days == -1:
+        e = (float(eleva_index.iloc[-1]) / float(eleva_index.iloc[0]) - 1) * 100
+        s = (float(stoxx_index.iloc[-1]) / float(stoxx_index.iloc[0]) - 1) * 100
+    elif days is None:
+        e = perf_ytd(eleva_index)
+        s = perf_ytd(stoxx_index)
+    else:
+        e = perf_safe(eleva_index, days)
+        s = perf_safe(stoxx_index, days)
+    rows.append({
+        "Période": label,
+        "ELEVA I EUR Acc": fmt(e),
+        "STOXX 600 NR": fmt(s),
+        "Surperformance ELEVA": fmt(e - s),
+    })
 
-    st.subheader("📈 Tableau des performances")
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+st.subheader("📈 Tableau des performances")
+st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    st.subheader("📉 Statistiques de risque (annualisées)")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**ELEVA European Selection I EUR Acc**")
-        for k, v in risk_stats(eleva_index).items():
-            st.metric(k, v)
-    with col2:
-        st.markdown("**STOXX Europe 600 Net Return**")
-        for k, v in risk_stats(stoxx_index_plot).items():
-            st.metric(k, v)
+# =====================
+# Statistiques de risque
+# =====================
+st.subheader("📉 Statistiques de risque (annualisées)")
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown("**ELEVA European Selection I EUR Acc**")
+    for k, v in risk_stats(eleva_index).items():
+        st.metric(k, v)
+with col2:
+    st.markdown("**STOXX Europe 600 Net Return**")
+    for k, v in risk_stats(stoxx_index).items():
+        st.metric(k, v)
 
-    fig_dd = go.Figure()
-    dd = lambda s: (s - s.cummax()) / s.cummax() * 100
-    fig_dd.add_trace(go.Scatter(x=eleva_index.index, y=dd(eleva_index),
-        name="ELEVA", fill="tozeroy", line=dict(color="#1f77b4", width=1.5)))
-    fig_dd.add_trace(go.Scatter(x=stoxx_index_plot.index, y=dd(stoxx_index_plot),
-        name="STOXX 600 NR", fill="tozeroy", line=dict(color="#d62728", width=1.5, dash="dash")))
-    fig_dd.update_layout(height=350, template="plotly_white", title="Drawdown (%)",
-        yaxis_title="Drawdown (%)", hovermode="x unified")
-    st.plotly_chart(fig_dd, use_container_width=True)
+# =====================
+# Graphique drawdown
+# =====================
+fig_dd = go.Figure()
+dd = lambda s: (s - s.cummax()) / s.cummax() * 100
+fig_dd.add_trace(go.Scatter(x=eleva_index.index, y=dd(eleva_index),
+    name="ELEVA", fill="tozeroy", line=dict(color="#1f77b4", width=1.5)))
+fig_dd.add_trace(go.Scatter(x=stoxx_index.index, y=dd(stoxx_index),
+    name="STOXX 600 NR", fill="tozeroy", line=dict(color="#d62728", width=1.5, dash="dash")))
+fig_dd.update_layout(height=350, template="plotly_white", title="Drawdown (%)",
+    yaxis_title="Drawdown (%)", hovermode="x unified")
+st.plotly_chart(fig_dd, use_container_width=True)
 
 # =====================
 # Notes méthodologiques
@@ -272,12 +280,12 @@ st.subheader("ℹ️ Notes méthodologiques")
 st.markdown("""
 | Instrument | Source | Description |
 |---|---|---|
-| ELEVA European Selection I EUR Acc | CSV manuel | ISIN LU1111643042 — NAV uploadées manuellement |
-| STOXX Europe 600 Net Return | `^STOXX` Yahoo Finance | Indice Total Return Net en EUR |
+| ELEVA European Selection I EUR Acc | Excel — Colonne B | ISIN LU1111643042 — NAV uploadées manuellement |
+| STOXX Europe 600 Net Return | Excel — Colonne C | NAV uploadées manuellement |
 
-- **Base 100** : rebasé à 100 à la date de début sélectionnée dans la sidebar.
-- **NAV ELEVA** : persistantes entre les sessions. Uploadez un nouveau CSV pour mettre à jour.
-- Le nouveau CSV est **fusionné** avec les données existantes (pas d'écrasement).
-- **Ratio de Sharpe** : sans taux sans risque (approximation).
+- **Base 100** : les deux séries sont rebasées à 100 à la date de début sélectionnée.
+- **Fusion** : chaque nouvel upload est fusionné avec les données existantes.
+- **Ratio de Sharpe** : calculé sans taux sans risque (approximation).
+- **Drawdown** : par rapport au plus haut historique glissant sur la période sélectionnée.
 """)
-st.caption("STOXX 600 : Yahoo Finance (yfinance) | ELEVA : NAV manuelles — Mise à jour sur upload")
+st.caption("Données : fichier Excel uploadé manuellement — Mise à jour sur upload")
