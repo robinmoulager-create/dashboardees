@@ -135,7 +135,11 @@ st.plotly_chart(fig, use_container_width=True)
 # Performances
 # =====================
 def fmt(v):
-    return f"{v:+.2f}%" if v == v else "N/A"  # v == v is False for NaN
+    try:
+        v = float(v)
+        return f"{v:+.2f}%" if v == v else "N/A"
+    except Exception:
+        return "N/A"
 
 if eleva_raw is not None:
 
@@ -145,15 +149,16 @@ if eleva_raw is not None:
         cutoff = series.index[-1] - timedelta(days=days)
         if cutoff < series.index[0]:
             cutoff = series.index[0]
-        start_val = series[series.index >= cutoff].iloc[0]
-        return (series.iloc[-1] / start_val - 1) * 100
+        start_val = float(series[series.index >= cutoff].iloc[0])
+        end_val = float(series.iloc[-1])
+        return (end_val / start_val - 1) * 100
 
     def perf_ytd(series):
         year_start = pd.Timestamp(series.index[-1].year, 1, 1)
         sub = series[series.index >= year_start]
         if sub.empty:
             return float("nan")
-        return (sub.iloc[-1] / sub.iloc[0] - 1) * 100
+        return (float(sub.iloc[-1]) / float(sub.iloc[0]) - 1) * 100
 
     periods = {
         "Hier (J-1)": 1,
