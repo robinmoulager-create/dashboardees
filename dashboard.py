@@ -17,9 +17,7 @@ start = st.sidebar.date_input("Date de début", datetime(2020, 1, 1))
 # Tickers à tester dans l'ordre pour ELEVA
 # =====================
 ELEVA_TICKERS_CANDIDATES = [
-    "0P00015D09.F",   # Frankfurt — le plus probable
-    "0P00015D09.L",   # London
-    "0P00015D09.PA",  # Paris
+    "0P0001TYZI.F",   # ELEVA European Selection I EUR Acc — ticker Yahoo Finance confirmé
 ]
 STOXX600_TICKER = "DX2X.DE"  # Xtrackers STOXX Europe 600 ETF — Total Return Net EUR
 
